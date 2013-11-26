@@ -568,17 +568,18 @@ class ConnectionHandler(object):
                           client._session_id,
                           hexlify(client._session_passwd))
 
-        with self._socket_error_handling():
-            self._socket = self.handler.create_connection(
-                (host, port), client._session_timeout / 1000.0)
-
+        MSG_FASTOPEN = 0x20000000
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.setblocking(0)
 
         connect = Connect(0, client.last_zxid, client._session_timeout,
                           client._session_id or 0, client._session_passwd,
                           client.read_only)
+        b = connect.serialize()
+        self._socket.sendto(int_struct.pack(len(b)) + b, MSG_FASTOPEN, (host, port))
 
-        connect_result, zxid = self._invoke(client._session_timeout, connect)
+        zxid = None
+        connect_result = self._read_connect_reply(client._session_timeout, connect)
 
         if connect_result.time_out <= 0:
             raise SessionExpiredError("Session has expired")
@@ -614,3 +615,19 @@ class ConnectionHandler(object):
             if zxid:
                 client.last_zxid = zxid
         return read_timeout, connect_timeout
+
+    def _read_connect_reply(self, timeout, request):
+        msg = self._read(4, timeout)
+        length = int_struct.unpack(msg)[0]
+        msg = self._read(length, timeout)
+
+        try:
+            obj, _ = request.deserialize(msg, 0)
+        except Exception:
+            self.logger.exception("Exception raised during deserialization"
+                                  " of request: %s", request)
+
+            # raise ConnectionDropped so connect loop will retry
+            raise ConnectionDropped('invalid server response')
+        self.logger.debug('Read response %s', obj)
+        return obj
