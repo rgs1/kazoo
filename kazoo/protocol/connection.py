@@ -52,10 +52,16 @@ _CONNECTION_DROP = object()
 
 STOP_CONNECTING = object()
 
+NONE_EVENT = -1
 CREATED_EVENT = 1
 DELETED_EVENT = 2
 CHANGED_EVENT = 3
 CHILD_EVENT = 4
+
+KEEPER_STATES_MAP = {
+    3: KeeperState.CONNECTED,
+    5: KeeperState.CONNECTED_RO,
+}
 
 WATCH_XID = -1
 PING_XID = -2
@@ -312,6 +318,9 @@ class ConnectionHandler(object):
             watchers.extend(client._child_watchers.pop(path, []))
         elif watch.type == CHILD_EVENT:
             watchers.extend(client._child_watchers.pop(path, []))
+        elif watch.type == NONE_EVENT and watch.state in KEEPER_STATES_MAP:
+            client._session_callback(KEEPER_STATES_MAP[watch.state])
+            return
         else:
             self.logger.warn('Received unknown event %r', watch.type)
             return
@@ -579,7 +588,8 @@ class ConnectionHandler(object):
 
         self._socket.setblocking(0)
 
-        connect = Connect(0, client.last_zxid, client._session_timeout,
+        proto_ver = 0x01 if client.read_only else 0x00
+        connect = Connect(proto_ver, client.last_zxid, client._session_timeout,
                           client._session_id or 0, client._session_passwd,
                           client.read_only)
 
@@ -607,12 +617,8 @@ class ConnectionHandler(object):
                           negotiated_session_timeout, connect_timeout,
                           read_timeout)
 
-        if connect_result.read_only:
-            client._session_callback(KeeperState.CONNECTED_RO)
-            self._ro_mode = iter(self._server_pinger())
-        else:
-            client._session_callback(KeeperState.CONNECTED)
-            self._ro_mode = None
+        state = KeeperState.CONNECTED_RO if connect_result.read_only else KeeperState.CONNECTED
+        client._session_callback(state)
 
         for scheme, auth in client.auth_data:
             ap = Auth(0, scheme, auth)

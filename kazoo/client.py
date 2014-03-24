@@ -397,8 +397,11 @@ class KazooClient(object):
         self.state_listeners.discard(listener)
 
     def _make_state_change(self, state):
-        # skip if state is current
-        if self.state == state:
+        # skip if state is current, except for (CONNECTED, CONNECTED_RO)
+        # transitions since these *are* different states but we don't
+        # expose that difference through the simplified state. Though
+        # apps can find out if we are RO via client_state.
+        if self.state == state and self.state != KazooState.CONNECTED:
             return
 
         self.state = state
