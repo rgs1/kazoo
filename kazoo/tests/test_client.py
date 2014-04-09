@@ -870,6 +870,18 @@ class TestClient(KazooTestCase):
         finally:
             self.cluster[0].run()
 
+    def test_remove_watches(self):
+        from kazoo.protocol.states import WatcherType
+
+        def watcher(event):
+            pass
+
+        self.client.create("/watches", b'first')
+
+        self.client.get("/watches", watcher)
+        rc = self.client.remove_watches("/watchesx", WatcherType.DATA)
+        self.assertTrue(rc)
+
 
 dummy_dict = {
     'aversion': 1, 'ctime': 0, 'cversion': 1,
